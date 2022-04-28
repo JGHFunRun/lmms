@@ -37,8 +37,13 @@ class SampleBufferV2 : public QObject
 {
 	Q_OBJECT
 public:
+	enum class StrDataType 
+	{
+		AudioFile, Base64
+	};
+
 	SampleBufferV2();
-	SampleBufferV2(const QString& audioFilePath);
+	SampleBufferV2(const QString& strData, StrDataType dataType);
 	SampleBufferV2(sampleFrame* data, const std::size_t numFrames);
 	SampleBufferV2(const std::size_t numFrames);
 
@@ -52,12 +57,16 @@ public:
 	sample_rate_t originalSampleRate() const;
 	const QString& filePath() const;
 	bool hasFilePath() const;
+
+	QString toBase64() const;
 	
 public slots:
 	void sampleRateChanged();
 
 private:
 	void resample(const sample_rate_t newSampleRate);
+	void loadFromAudioFile(const QString& audioFilePath);
+	void loadFromBase64(const QString& str);
 
 private:
 	std::vector<sampleFrame> m_data;

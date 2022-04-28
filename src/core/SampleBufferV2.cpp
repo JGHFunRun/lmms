@@ -22,6 +22,8 @@
  *
  */
 
+#include "base64.h"
+
 #include "SampleBufferV2.h"
 #include "AudioEngine.h"
 #include "Engine.h"
@@ -34,54 +36,16 @@ SampleBufferV2::SampleBufferV2()
 	connect(Engine::audioEngine(), SIGNAL(sampleRateChanged()), this, SLOT(sampleRateChanged()));
 }
 
-SampleBufferV2::SampleBufferV2(const QString &audioFilePath) : SampleBufferV2()
+SampleBufferV2::SampleBufferV2(const QString &strData, StrDataType dataType) : SampleBufferV2()
 {
-	auto audioFile = QFile(audioFilePath);
-	if (!audioFile.open(QIODevice::ReadOnly)) 
+	switch (dataType)
 	{
-		throw std::runtime_error("Could not open file " + audioFilePath.toStdString());
-	}
-
-	SF_INFO sfInfo;
-	sfInfo.format = 0;
-
-	auto sndFileDeleter = [&](SNDFILE* ptr)
-	{ sf_close(ptr);
-	  audioFile.close(); };
-
-	auto sndFile = std::unique_ptr<SNDFILE, decltype(sndFileDeleter)>(sf_open_fd(audioFile.handle(), SFM_READ, &sfInfo, false), sndFileDeleter);
-
-	if (!sndFile)
-	{
-		throw std::runtime_error(sf_strerror(sndFile.get()));
-	}
-
-	sf_count_t numSamples = sfInfo.frames * sfInfo.channels;
-	auto samples = std::vector<sample_t>(numSamples);
-	sf_count_t samplesRead = sf_read_float(sndFile.get(), samples.data(), numSamples);
-
-	if (samplesRead != numSamples) 
-	{
-		throw std::runtime_error("Could not read sample");
-	}
-
-	sf_count_t numFrames = samplesRead / sfInfo.channels;
-	m_data.resize(numFrames);
-
-	int isMono = sfInfo.channels == 1 ? 1 : 0;
-	for (int frameIdx = 0; frameIdx < numFrames; ++frameIdx) 
-	{
-		m_data[frameIdx][0] = samples[frameIdx * sfInfo.channels];
-		m_data[frameIdx][1] = samples[frameIdx * sfInfo.channels + isMono];
-	}
-
-	m_filePath = audioFilePath;
-	m_originalSampleRate = sfInfo.samplerate;
-	
-	sample_rate_t engineSampleRate = Engine::audioEngine()->processingSampleRate();
-	if (m_originalSampleRate != engineSampleRate) 
-	{
-		resample(engineSampleRate);
+	case StrDataType::AudioFile:
+		loadFromAudioFile(strData);
+		break;
+	case StrDataType::Base64:
+		loadFromBase64(strData);
+		break;
 	}
 }
 
@@ -137,6 +101,13 @@ bool SampleBufferV2::hasFilePath() const
 	return !m_filePath.isEmpty();
 }
 
+QString SampleBufferV2::toBase64() const
+{
+	QString dst = "";
+	base64::encode((const char *) m_data.data(), m_data.size() * sizeof(sampleFrame), dst);
+	return dst;
+}
+
 void SampleBufferV2::sampleRateChanged()
 {
 	resample(Engine::audioEngine()->processingSampleRate());
@@ -145,4 +116,65 @@ void SampleBufferV2::sampleRateChanged()
 void SampleBufferV2::resample(const sample_rate_t newSampleRate) 
 {
 	//TODO
+}
+
+void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath) 
+{
+	auto audioFile = QFile(audioFilePath);
+	if (!audioFile.open(QIODevice::ReadOnly)) 
+	{
+		throw std::runtime_error("Could not open file " + audioFilePath.toStdString());
+	}
+
+	SF_INFO sfInfo;
+	sfInfo.format = 0;
+
+	auto sndFileDeleter = [&](SNDFILE* ptr)
+	{ sf_close(ptr);
+	  audioFile.close(); };
+
+	auto sndFile = std::unique_ptr<SNDFILE, decltype(sndFileDeleter)>(sf_open_fd(audioFile.handle(), SFM_READ, &sfInfo, false), sndFileDeleter);
+
+	if (!sndFile)
+	{
+		throw std::runtime_error(sf_strerror(sndFile.get()));
+	}
+
+	sf_count_t numSamples = sfInfo.frames * sfInfo.channels;
+	auto samples = std::vector<sample_t>(numSamples);
+	sf_count_t samplesRead = sf_read_float(sndFile.get(), samples.data(), numSamples);
+
+	if (samplesRead != numSamples) 
+	{
+		throw std::runtime_error("Could not read sample");
+	}
+
+	sf_count_t numFrames = samplesRead / sfInfo.channels;
+	m_data.resize(numFrames);
+
+	int isMono = sfInfo.channels == 1 ? 1 : 0;
+	for (int frameIdx = 0; frameIdx < numFrames; ++frameIdx) 
+	{
+		m_data[frameIdx][0] = samples[frameIdx * sfInfo.channels];
+		m_data[frameIdx][1] = samples[frameIdx * sfInfo.channels + isMono];
+	}
+
+	m_filePath = audioFilePath;
+	m_originalSampleRate = sfInfo.samplerate;
+	
+	sample_rate_t engineSampleRate = Engine::audioEngine()->processingSampleRate();
+	if (m_originalSampleRate != engineSampleRate) 
+	{
+		resample(engineSampleRate);
+	}	
+}
+
+void SampleBufferV2::loadFromBase64(const QString& data) 
+{
+	char * dst = nullptr;
+	int dsize = 0;
+	base64::decode(data, &dst, &dsize);
+
+	m_data = std::vector<sampleFrame>(dsize / sizeof(sampleFrame));
+	std::copy(dst, dst + dsize, m_data.begin());
 }
