@@ -81,7 +81,7 @@ public slots:
 	void sampleRateChanged();
 
 private:
-	std::vector<sampleFrame> getSampleFragment(f_cnt_t index, f_cnt_t end, f_cnt_t numFrames, f_cnt_t loopStart, f_cnt_t, loopEnd, LoopMode loopMode, bool backwards) const;
+	std::vector<sampleFrame> getSampleFragment(f_cnt_t index, f_cnt_t end, f_cnt_t numFrames, f_cnt_t loopStart, f_cnt_t loopEnd, LoopMode loopMode, bool backwards) const;
 	f_cnt_t getLoopedIndex(f_cnt_t index, f_cnt_t startFrame, f_cnt_t endFrame) const;
 	f_cnt_t getPingPongIndex(f_cnt_t index, f_cnt_t startFrame, f_cnt_t endFrame) const;
 
