@@ -22,8 +22,6 @@
  *
  */
 
-#include "base64.h"
-
 #include "SampleBufferV2.h"
 #include "AudioEngine.h"
 #include "Engine.h"
@@ -103,9 +101,8 @@ bool SampleBufferV2::hasFilePath() const
 
 QString SampleBufferV2::toBase64() const
 {
-	QString dst = "";
-	base64::encode((const char *) m_data.data(), m_data.size() * sizeof(sampleFrame), dst);
-	return dst;
+	QByteArray data = QByteArray(reinterpret_cast<const char*>(m_data.data()), m_data.size() * sizeof(sampleFrame));
+	return data.toBase64();
 }
 
 void SampleBufferV2::sampleRateChanged()
@@ -169,12 +166,10 @@ void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath)
 	}	
 }
 
-void SampleBufferV2::loadFromBase64(const QString& data) 
+void SampleBufferV2::loadFromBase64(const QString& str) 
 {
-	char * dst = nullptr;
-	int dsize = 0;
-	base64::decode(data, &dst, &dsize);
-
-	m_data = std::vector<sampleFrame>(dsize / sizeof(sampleFrame));
-	std::copy(dst, dst + dsize, m_data.begin());
+	QByteArray data = QByteArray::fromBase64(str.toUtf8());
+	m_data = std::vector<sampleFrame>(data.size() / sizeof(sampleFrame));
+	sampleFrame* dataAsSampleFrame = reinterpret_cast<sampleFrame*>(data.data());
+	std::copy(dataAsSampleFrame, dataAsSampleFrame + data.size(), m_data.begin());
 }
