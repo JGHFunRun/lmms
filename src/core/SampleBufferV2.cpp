@@ -30,9 +30,11 @@
 #include <sndfile.h>
 
 SampleBufferV2::SampleBufferV2()
-	{}
+{
+	connect(Engine::audioEngine(), SIGNAL(sampleRateChanged()), this, SLOT(sampleRateChanged()));
+}
 
-SampleBufferV2::SampleBufferV2(const QString &audioFilePath)
+SampleBufferV2::SampleBufferV2(const QString &audioFilePath) : SampleBufferV2()
 {
 	auto audioFile = QFile(audioFilePath);
 	if (!audioFile.open(QIODevice::ReadOnly)) 
@@ -74,21 +76,33 @@ SampleBufferV2::SampleBufferV2(const QString &audioFilePath)
 	}
 
 	m_filePath = audioFilePath;
-	m_sampleRate = sfInfo.samplerate;
+	m_originalSampleRate = sfInfo.samplerate;
+	
+	sample_rate_t engineSampleRate = Engine::audioEngine()->processingSampleRate();
+	if (m_originalSampleRate != engineSampleRate) 
+	{
+		resample(engineSampleRate);
+	}
 }
 
-SampleBufferV2::SampleBufferV2(sampleFrame *data, const std::size_t numFrames) :
-	m_data(data, data + numFrames),
-	m_sampleRate(Engine::audioEngine()->processingSampleRate()) {}
+SampleBufferV2::SampleBufferV2(sampleFrame *data, const std::size_t numFrames) : SampleBufferV2()
+{
+	m_data = std::vector<sampleFrame>(data, data + numFrames);
+	m_originalSampleRate = Engine::audioEngine()->processingSampleRate();
+}
 
-SampleBufferV2::SampleBufferV2(const std::size_t numFrames) :
-	m_data(numFrames),
-	m_sampleRate(Engine::audioEngine()->processingSampleRate()) {}
+SampleBufferV2::SampleBufferV2(const std::size_t numFrames) : SampleBufferV2()
+{
+	m_data = std::vector<sampleFrame>(numFrames);
+	m_originalSampleRate = Engine::audioEngine()->processingSampleRate();
+}
 
-SampleBufferV2::SampleBufferV2(SampleBufferV2&& other) :
-	m_data(std::move(other.m_data)),
-	m_sampleRate(std::move(other.m_sampleRate)),
-	m_filePath(std::move(other.m_filePath)) {}
+SampleBufferV2::SampleBufferV2(SampleBufferV2&& other) : SampleBufferV2()
+{
+	m_data = std::move(other.m_data);
+	m_originalSampleRate = std::move(other.m_originalSampleRate);
+	m_filePath = std::move(other.m_filePath);
+}
 
 SampleBufferV2& SampleBufferV2::operator=(SampleBufferV2&& other) 
 {
@@ -98,7 +112,7 @@ SampleBufferV2& SampleBufferV2::operator=(SampleBufferV2&& other)
 	}
 
 	m_data = std::move(other.m_data);
-	m_sampleRate = std::move(other.m_sampleRate);
+	m_originalSampleRate = std::move(other.m_originalSampleRate);
 	m_filePath = std::move(other.m_filePath);
 	return *this;
 }
@@ -108,9 +122,9 @@ const std::vector<sampleFrame> &SampleBufferV2::data() const
 	return m_data;
 }
 
-sample_rate_t SampleBufferV2::sampleRate() const
+sample_rate_t SampleBufferV2::originalSampleRate() const
 {
-	return m_sampleRate;
+	return m_originalSampleRate;
 }
 
 const QString &SampleBufferV2::filePath() const
@@ -121,4 +135,14 @@ const QString &SampleBufferV2::filePath() const
 bool SampleBufferV2::hasFilePath() const 
 {
 	return !m_filePath.isEmpty();
+}
+
+void SampleBufferV2::sampleRateChanged()
+{
+	resample(Engine::audioEngine()->processingSampleRate());
+}
+
+void SampleBufferV2::resample(const sample_rate_t newSampleRate) 
+{
+	//TODO
 }

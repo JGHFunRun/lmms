@@ -28,11 +28,14 @@
 #include <memory>
 #include <vector>
 #include "lmms_basics.h"
+#include "samplerate.h"
 
+#include <QObject>
 #include <QString>
 
-class SampleBufferV2
+class SampleBufferV2 : public QObject
 {
+	Q_OBJECT
 public:
 	SampleBufferV2();
 	SampleBufferV2(const QString& audioFilePath);
@@ -46,12 +49,19 @@ public:
 	SampleBufferV2& operator=(const SampleBufferV2& other) = delete;
 
 	const std::vector<sampleFrame>& data() const;
-	sample_rate_t sampleRate() const;
+	sample_rate_t originalSampleRate() const;
 	const QString& filePath() const;
 	bool hasFilePath() const;
+	
+public slots:
+	void sampleRateChanged();
+
+private:
+	void resample(const sample_rate_t newSampleRate);
+
 private:
 	std::vector<sampleFrame> m_data;
-	sample_rate_t m_sampleRate;
+	sample_rate_t m_originalSampleRate;
 
 	//TODO: C++17 and above: use std::optional<QString>
 	QString m_filePath;
