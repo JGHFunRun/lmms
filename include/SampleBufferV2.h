@@ -54,7 +54,7 @@ public:
 	SampleBufferV2& operator=(const SampleBufferV2& other) = delete;
 
 	const std::vector<sampleFrame>& data() const;
-	sample_rate_t originalSampleRate() const;
+	sample_rate_t sampleRate() const;
 	const QString& filePath() const;
 	bool hasFilePath() const;
 
@@ -64,13 +64,12 @@ public slots:
 	void sampleRateChanged();
 
 private:
-	void resample(const sample_rate_t newSampleRate);
 	void loadFromAudioFile(const QString& audioFilePath);
 	void loadFromBase64(const QString& str);
-
+	bool resample(const sample_rate_t newSampleRate);
 private:
 	std::vector<sampleFrame> m_data;
-	sample_rate_t m_originalSampleRate;
+	sample_rate_t m_sampleRate;
 
 	//TODO: C++17 and above: use std::optional<QString>
 	QString m_filePath;

@@ -28,6 +28,7 @@
 
 #include <QFile>
 #include <sndfile.h>
+#include <iostream>
 
 SampleBufferV2::SampleBufferV2()
 {
@@ -50,19 +51,19 @@ SampleBufferV2::SampleBufferV2(const QString &strData, StrDataType dataType) : S
 SampleBufferV2::SampleBufferV2(sampleFrame *data, const std::size_t numFrames) : SampleBufferV2()
 {
 	m_data = std::vector<sampleFrame>(data, data + numFrames);
-	m_originalSampleRate = Engine::audioEngine()->processingSampleRate();
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 SampleBufferV2::SampleBufferV2(const std::size_t numFrames) : SampleBufferV2()
 {
 	m_data = std::vector<sampleFrame>(numFrames);
-	m_originalSampleRate = Engine::audioEngine()->processingSampleRate();
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 SampleBufferV2::SampleBufferV2(SampleBufferV2&& other) : SampleBufferV2()
 {
 	m_data = std::move(other.m_data);
-	m_originalSampleRate = std::move(other.m_originalSampleRate);
+	m_sampleRate = std::move(other.m_sampleRate);
 	m_filePath = std::move(other.m_filePath);
 }
 
@@ -74,7 +75,7 @@ SampleBufferV2& SampleBufferV2::operator=(SampleBufferV2&& other)
 	}
 
 	m_data = std::move(other.m_data);
-	m_originalSampleRate = std::move(other.m_originalSampleRate);
+	m_sampleRate = std::move(other.m_sampleRate);
 	m_filePath = std::move(other.m_filePath);
 	return *this;
 }
@@ -84,9 +85,9 @@ const std::vector<sampleFrame> &SampleBufferV2::data() const
 	return m_data;
 }
 
-sample_rate_t SampleBufferV2::originalSampleRate() const
+sample_rate_t SampleBufferV2::sampleRate() const
 {
-	return m_originalSampleRate;
+	return m_sampleRate;
 }
 
 const QString &SampleBufferV2::filePath() const
@@ -110,9 +111,42 @@ void SampleBufferV2::sampleRateChanged()
 	resample(Engine::audioEngine()->processingSampleRate());
 }
 
-void SampleBufferV2::resample(const sample_rate_t newSampleRate) 
+bool SampleBufferV2::resample(const sample_rate_t newSampleRate) 
 {
-	//TODO
+	if (m_sampleRate == newSampleRate) 
+	{
+		return false;
+	}
+
+	f_cnt_t numFramesSrc = m_data.size();
+	f_cnt_t numFramesDst = static_cast<f_cnt_t>((numFramesSrc / (float) m_sampleRate) * (float) newSampleRate);
+	auto dstFrames = std::vector<sampleFrame>(numFramesDst);
+
+	int error;
+	auto sampleStateDeleter = [&](SRC_STATE* ptr) { src_delete(ptr); };
+	auto sampleState = std::unique_ptr<SRC_STATE, decltype(sampleStateDeleter)>(src_new(SRC_SINC_MEDIUM_QUALITY, DEFAULT_CHANNELS, &error), sampleStateDeleter);
+
+	if (!sampleState)
+	{
+		std::cout << "src_new() failed in SampleBufferV2.cpp!\n";
+		return false;
+	}
+
+	SRC_DATA srcData;
+	srcData.data_in = m_data.data()->data();
+	srcData.input_frames = m_data.size();
+	srcData.data_out = dstFrames.data()->data();
+	srcData.output_frames = numFramesDst;
+	srcData.src_ratio = (double) newSampleRate / m_sampleRate;
+	if ((error = src_process(sampleState.get(), &srcData))) 
+	{
+		std::cout << "Could not resample SampleBuffer: " << src_strerror(error) << '\n';
+		return false;
+	}
+
+	m_data = std::move(dstFrames);
+	m_sampleRate = newSampleRate;
+	return true;
 }
 
 void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath) 
@@ -157,10 +191,10 @@ void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath)
 	}
 
 	m_filePath = audioFilePath;
-	m_originalSampleRate = sfInfo.samplerate;
-	
+	m_sampleRate = sfInfo.samplerate;
+
 	sample_rate_t engineSampleRate = Engine::audioEngine()->processingSampleRate();
-	if (m_originalSampleRate != engineSampleRate) 
+	if (m_sampleRate != engineSampleRate) 
 	{
 		resample(engineSampleRate);
 	}	
@@ -168,8 +202,8 @@ void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath)
 
 void SampleBufferV2::loadFromBase64(const QString& str) 
 {
-	QByteArray data = QByteArray::fromBase64(str.toUtf8());
-	m_data = std::vector<sampleFrame>(data.size() / sizeof(sampleFrame));
-	sampleFrame* dataAsSampleFrame = reinterpret_cast<sampleFrame*>(data.data());
-	std::copy(dataAsSampleFrame, dataAsSampleFrame + data.size(), m_data.begin());
+	QByteArray base64Data = QByteArray::fromBase64(str.toUtf8());
+	sampleFrame* dataAsSampleFrame = reinterpret_cast<sampleFrame*>(base64Data.data());
+	m_data = std::vector<sampleFrame>(base64Data.size() / sizeof(sampleFrame));
+	std::copy(dataAsSampleFrame, dataAsSampleFrame + base64Data.size(), m_data.begin());
 }
