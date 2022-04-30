@@ -1,7 +1,6 @@
 /*
  * SampleBufferCache.h - Used to cache sample buffers
  *
- * Copyright (C) 2022 JGHFunRun <JGHFunRun@gmail.com>
  * Copyright (c) 2022 sakertooth <sakertooth@gmail.com>
  *
  * This file is part of LMMS - https://lmms.io
@@ -34,12 +33,15 @@
 class SampleBufferCache
 {
 public:
-	std::shared_ptr<const SampleBufferV2> insert(const QString& id, SampleBufferV2* buffer);
-	bool contains(const QString& id);
+	std::shared_ptr<const SampleBufferV2> get(const QString& id);
+	std::shared_ptr<const SampleBufferV2> add(const QString& id, const SampleBufferV2* buffer);
 	std::size_t size() const;
+	bool contains(const QString& id);
+
 	std::shared_ptr<const SampleBufferV2> operator[](const QString& id);
 private:
-	std::map<QString, SampleBufferV2*> m_cache;
+	std::map<QString, std::weak_ptr<const SampleBufferV2>> m_cache;
+	void removeFromCache(const QString& id, const SampleBufferV2* ptr) noexcept;
 };
 
 #endif
