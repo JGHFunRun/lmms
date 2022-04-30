@@ -28,6 +28,7 @@
 #include <memory>
 #include <QObject>
 
+#include "lmms_basics.h"
 #include "SampleBufferV2.h"
 #include "SampleBufferCache.h"
 
@@ -44,8 +45,7 @@ public:
 	};
 
 	Sample();
-	Sample(const QString& audioFile);
-	Sample(const SampleBufferV2* buffer);
+	Sample(const QString& strData, SampleBufferV2::StrDataType dataType);
 	Sample(const sampleFrame* data, const std::size_t numFrames);
 	Sample(const std::size_t numFrames);
 
@@ -54,6 +54,7 @@ public:
 	void visualize(QPainter& painter, const QRect& drawingRect, f_cnt_t fromFrame = 0, f_cnt_t toFrame = 0);
 
 	std::shared_ptr<const SampleBufferV2> sampleBuffer() const;
+	sample_rate_t sampleRate() const;
 	float amplification() const;
 	float frequency() const;
 	bool reversed() const;
@@ -64,6 +65,7 @@ public:
 	f_cnt_t loopStartFrame() const;
 	f_cnt_t loopEndFrame() const;
 
+	void setSampleData(const QString& str, SampleBufferV2::StrDataType dataType);
 	void setAmplification(float amplification);
 	void setFrequency(float frequency);
 	void setReversed(bool reversed);
@@ -75,8 +77,11 @@ public:
 	void setLoopEndFrame(f_cnt_t loopEnd);
 	void setAllPointFrames(f_cnt_t start, f_cnt_t end, f_cnt_t loopStart, f_cnt_t loopEnd);
 
-	int calculateSampleLength() const;
+	static Sample openSample();
 
+	int calculateSampleLength() const;
+	sample_t userWaveSample(const float sample) const;
+	
 public slots:
 	void sampleRateChanged();
 
