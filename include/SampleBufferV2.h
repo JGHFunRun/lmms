@@ -44,7 +44,7 @@ public:
 
 	SampleBufferV2();
 	SampleBufferV2(const QString& strData, StrDataType dataType);
-	SampleBufferV2(sampleFrame* data, const std::size_t numFrames);
+	SampleBufferV2(const sampleFrame* data, const std::size_t numFrames);
 	SampleBufferV2(const std::size_t numFrames);
 
 	SampleBufferV2(SampleBufferV2&& other);
@@ -59,6 +59,7 @@ public:
 	bool hasFilePath() const;
 
 	QString toBase64() const;
+	f_cnt_t numFrames() const;
 	
 public slots:
 	void sampleRateChanged();
@@ -67,6 +68,7 @@ private:
 	void loadFromAudioFile(const QString& audioFilePath);
 	void loadFromBase64(const QString& str);
 	bool resample(const sample_rate_t newSampleRate);
+
 private:
 	std::vector<sampleFrame> m_data;
 	sample_rate_t m_sampleRate;

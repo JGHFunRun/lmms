@@ -48,7 +48,7 @@ SampleBufferV2::SampleBufferV2(const QString &strData, StrDataType dataType) : S
 	}
 }
 
-SampleBufferV2::SampleBufferV2(sampleFrame *data, const std::size_t numFrames) : SampleBufferV2()
+SampleBufferV2::SampleBufferV2(const sampleFrame *data, const std::size_t numFrames) : SampleBufferV2()
 {
 	m_data = std::vector<sampleFrame>(data, data + numFrames);
 	m_sampleRate = Engine::audioEngine()->processingSampleRate();
@@ -104,6 +104,11 @@ QString SampleBufferV2::toBase64() const
 {
 	QByteArray data = QByteArray(reinterpret_cast<const char*>(m_data.data()), m_data.size() * sizeof(sampleFrame));
 	return data.toBase64();
+}
+
+f_cnt_t SampleBufferV2::numFrames() const 
+{
+	return m_data.size();
 }
 
 void SampleBufferV2::sampleRateChanged()
