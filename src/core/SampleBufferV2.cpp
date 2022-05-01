@@ -25,12 +25,18 @@
 #include "SampleBufferV2.h"
 #include "AudioEngine.h"
 #include "Engine.h"
+#include "lmms_basics.h"
 
 #include <QFile>
+#include <memory>
+#include <samplerate.h>
 #include <sndfile.h>
 #include <iostream>
 
-SampleBufferV2::SampleBufferV2()
+SampleBufferV2::SampleBufferV2() :
+	m_data(),
+	m_sampleRate(0),
+	m_numFrames(0)
 {
 	connect(Engine::audioEngine(), SIGNAL(sampleRateChanged()), this, SLOT(sampleRateChanged()));
 }
@@ -52,18 +58,21 @@ SampleBufferV2::SampleBufferV2(const sampleFrame *data, const std::size_t numFra
 {
 	m_data = std::vector<sampleFrame>(data, data + numFrames);
 	m_sampleRate = Engine::audioEngine()->processingSampleRate();
+	m_numFrames = numFrames;
 }
 
 SampleBufferV2::SampleBufferV2(const std::size_t numFrames) : SampleBufferV2()
 {
-	m_data = std::vector<sampleFrame>(numFrames);
+	m_data = std::vector<sampleFrame>(numFrames * DEFAULT_CHANNELS);
 	m_sampleRate = Engine::audioEngine()->processingSampleRate();
+	m_numFrames = numFrames;
 }
 
 SampleBufferV2::SampleBufferV2(SampleBufferV2&& other) : SampleBufferV2()
 {
 	m_data = std::move(other.m_data);
 	m_sampleRate = std::move(other.m_sampleRate);
+	m_numFrames = std::move(other.m_numFrames);
 	m_filePath = std::move(other.m_filePath);
 }
 
@@ -76,11 +85,12 @@ SampleBufferV2& SampleBufferV2::operator=(SampleBufferV2&& other)
 
 	m_data = std::move(other.m_data);
 	m_sampleRate = std::move(other.m_sampleRate);
+	m_numFrames = std::move(other.m_numFrames);
 	m_filePath = std::move(other.m_filePath);
 	return *this;
 }
 	
-const std::vector<sampleFrame> &SampleBufferV2::data() const
+const std::vector<sampleFrame> &SampleBufferV2::sampleData() const
 {
 	return m_data;
 }
@@ -106,7 +116,7 @@ QString SampleBufferV2::toBase64() const
 	return data.toBase64();
 }
 
-f_cnt_t SampleBufferV2::numFrames() const 
+f_cnt_t SampleBufferV2::numFrames() const
 {
 	return m_data.size();
 }
@@ -123,34 +133,31 @@ bool SampleBufferV2::resample(const sample_rate_t newSampleRate)
 		return false;
 	}
 
-	f_cnt_t numFramesSrc = m_data.size();
-	f_cnt_t numFramesDst = static_cast<f_cnt_t>((numFramesSrc / (float) m_sampleRate) * (float) newSampleRate);
-	auto dstFrames = std::vector<sampleFrame>(numFramesDst);
+	const f_cnt_t dstFrames = static_cast<f_cnt_t>((m_numFrames / (float) m_sampleRate) * (float) newSampleRate);
+	auto resampleBuf = std::vector<sampleFrame>(dstFrames * 2);
 
 	int error;
-	auto sampleStateDeleter = [&](SRC_STATE* ptr) { src_delete(ptr); };
-	auto sampleState = std::unique_ptr<SRC_STATE, decltype(sampleStateDeleter)>(src_new(SRC_SINC_MEDIUM_QUALITY, DEFAULT_CHANNELS, &error), sampleStateDeleter);
-
-	if (!sampleState)
+	SRC_STATE* state;
+	if ((state = src_new(SRC_SINC_MEDIUM_QUALITY, DEFAULT_CHANNELS, &error)) != nullptr)
 	{
-		std::cout << "src_new() failed in SampleBufferV2.cpp!\n";
-		return false;
+		SRC_DATA srcData;
+		srcData.data_in = m_data.data()->data();
+		srcData.input_frames = m_numFrames;
+		srcData.data_out = resampleBuf.data()->data();
+		srcData.output_frames = dstFrames;
+		srcData.src_ratio = static_cast<double>(newSampleRate) / m_sampleRate;
+		srcData.end_of_input = 1;
+
+		error = src_process(state, &srcData);
+		src_delete(state);
 	}
 
-	SRC_DATA srcData;
-	srcData.data_in = m_data.data()->data();
-	srcData.input_frames = m_data.size();
-	srcData.data_out = dstFrames.data()->data();
-	srcData.output_frames = numFramesDst;
-	srcData.src_ratio = (double) newSampleRate / m_sampleRate;
-	if ((error = src_process(sampleState.get(), &srcData))) 
+	if (error != 0) 
 	{
-		std::cout << "Could not resample SampleBuffer: " << src_strerror(error) << '\n';
-		return false;
+		std::cout << "An error occurred when resampling: " << src_strerror(error) << '\n';
 	}
 
-	m_data = std::move(dstFrames);
-	m_sampleRate = newSampleRate;
+	m_data = resampleBuf;
 	return true;
 }
 
@@ -176,33 +183,32 @@ void SampleBufferV2::loadFromAudioFile(const QString& audioFilePath)
 		throw std::runtime_error(sf_strerror(sndFile.get()));
 	}
 
-	sf_count_t numSamples = sfInfo.frames * sfInfo.channels;
-	auto samples = std::vector<sample_t>(numSamples);
-	sf_count_t samplesRead = sf_read_float(sndFile.get(), samples.data(), numSamples);
+	auto samples = std::vector<sample_t>(sfInfo.frames * sfInfo.channels);
+	sf_count_t samplesRead = sf_read_float(sndFile.get(), samples.data(), sfInfo.frames * sfInfo.channels);
 
-	if (samplesRead != numSamples) 
+	if (samplesRead != samples.size())
 	{
 		throw std::runtime_error("Could not read sample");
 	}
 
-	sf_count_t numFrames = samplesRead / sfInfo.channels;
-	m_data.resize(numFrames);
+	m_data = std::vector<sampleFrame>(sfInfo.frames);
+	bool isMono = sfInfo.channels == 1;
 
-	int isMono = sfInfo.channels == 1 ? 1 : 0;
-	for (int frameIdx = 0; frameIdx < numFrames; ++frameIdx) 
+	for (int frameIdx = 0; frameIdx < sfInfo.frames; ++frameIdx) 
 	{
 		m_data[frameIdx][0] = samples[frameIdx * sfInfo.channels];
-		m_data[frameIdx][1] = samples[frameIdx * sfInfo.channels + isMono];
+		m_data[frameIdx][1] = samples[frameIdx * sfInfo.channels + (isMono ? 0 : 1)];
 	}
 
-	m_filePath = audioFilePath;
+	m_numFrames = sfInfo.frames;
 	m_sampleRate = sfInfo.samplerate;
+	m_filePath = audioFilePath;
 
 	sample_rate_t engineSampleRate = Engine::audioEngine()->processingSampleRate();
-	if (m_sampleRate != engineSampleRate) 
+	if (m_sampleRate != engineSampleRate)
 	{
 		resample(engineSampleRate);
-	}	
+	}
 }
 
 void SampleBufferV2::loadFromBase64(const QString& str) 

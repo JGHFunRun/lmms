@@ -26,45 +26,29 @@
 #include "SampleBufferCache.h"
 #include "SampleBufferV2.h"
 
-std::shared_ptr<const SampleBufferV2> SampleBufferCache::get(const QString& id) 
+std::shared_ptr<const SampleBufferV2> SampleBufferCache::get(const QString& id)
 {
-	if (contains(id)) 
-	{
-		return nullptr;
-	}
-	
-	return m_cache[id].lock();
+    if (!m_hash.contains(id))
+    {
+        return nullptr;
+    }
+    return m_hash.value(id).lock();
 }
 
-std::shared_ptr<const SampleBufferV2> SampleBufferCache::add(const QString& id, const SampleBufferV2 *buffer) 
+std::shared_ptr<const SampleBufferV2> SampleBufferCache::add(const QString& id, const SampleBufferV2 *buffer)
 {
-	if (contains(id))
-	{
-		return nullptr;
-	}
+    if (m_hash.contains(id))
+    {
+        return m_hash.value(id).lock();
+    }
 
-	auto sharedBuffer = std::shared_ptr<const SampleBufferV2>(buffer, [&](auto ptr) { removeFromCache(id, ptr); });
-	m_cache.insert({id, std::weak_ptr<const SampleBufferV2>(sharedBuffer)});
-	return sharedBuffer;
+    auto sharedBuffer = std::shared_ptr<const SampleBufferV2>(buffer, [=](auto ptr){ removeFromCache(id, ptr); });
+    m_hash.insert(id, std::weak_ptr<const SampleBufferV2>(sharedBuffer));
+    return sharedBuffer;
 }
 
-std::size_t SampleBufferCache::size() const 
+void SampleBufferCache::removeFromCache(const QString& id, const SampleBufferV2* ptr) noexcept
 {
-	return m_cache.size();
-}
-
-bool SampleBufferCache::contains(const QString& id) 
-{
-	return m_cache.find(id) != m_cache.end();
-}
-
-std::shared_ptr<const SampleBufferV2> SampleBufferCache::operator[](const QString& id) 
-{
-	return get(id);	
-}
-
-void SampleBufferCache::removeFromCache(const QString& id, const SampleBufferV2* ptr) noexcept 
-{
-	delete ptr;
-	m_cache.erase(id);
+    delete ptr;
+    m_hash.remove(id);
 }

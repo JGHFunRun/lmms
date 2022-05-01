@@ -44,7 +44,7 @@ public:
 
 	SampleBufferV2();
 	SampleBufferV2(const QString& strData, StrDataType dataType);
-	SampleBufferV2(const sampleFrame* data, const std::size_t numFrames);
+	SampleBufferV2(const sampleFrame *data, const std::size_t numFrames);
 	SampleBufferV2(const std::size_t numFrames);
 
 	SampleBufferV2(SampleBufferV2&& other);
@@ -53,14 +53,15 @@ public:
 	SampleBufferV2(const SampleBufferV2& other) = delete;
 	SampleBufferV2& operator=(const SampleBufferV2& other) = delete;
 
-	const std::vector<sampleFrame>& data() const;
+	const std::vector<sampleFrame>& sampleData() const;
 	sample_rate_t sampleRate() const;
+	f_cnt_t numFrames() const;
+
 	const QString& filePath() const;
 	bool hasFilePath() const;
 
 	QString toBase64() const;
-	f_cnt_t numFrames() const;
-	
+
 public slots:
 	void sampleRateChanged();
 
@@ -72,6 +73,7 @@ private:
 private:
 	std::vector<sampleFrame> m_data;
 	sample_rate_t m_sampleRate;
+	f_cnt_t m_numFrames;
 
 	//TODO: C++17 and above: use std::optional<QString>
 	QString m_filePath;

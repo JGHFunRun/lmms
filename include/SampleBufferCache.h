@@ -25,9 +25,10 @@
 #ifndef SAMPLE_BUFFER_CACHE_H
 #define SAMPLE_BUFFER_CACHE_H
 
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <QString>
+#include <QHash>
 #include "SampleBufferV2.h"
 
 class SampleBufferCache
@@ -35,12 +36,8 @@ class SampleBufferCache
 public:
 	std::shared_ptr<const SampleBufferV2> get(const QString& id);
 	std::shared_ptr<const SampleBufferV2> add(const QString& id, const SampleBufferV2* buffer);
-	std::size_t size() const;
-	bool contains(const QString& id);
-
-	std::shared_ptr<const SampleBufferV2> operator[](const QString& id);
 private:
-	std::map<QString, std::weak_ptr<const SampleBufferV2>> m_cache;
+	QHash<QString, std::weak_ptr<const SampleBufferV2>> m_hash;
 	void removeFromCache(const QString& id, const SampleBufferV2* ptr) noexcept;
 };
 
