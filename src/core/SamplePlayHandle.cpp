@@ -28,17 +28,21 @@
 #include "Engine.h"
 #include "Note.h"
 #include "PatternTrack.h"
+#include "Sample.h"
+#include "SampleBufferV2.h"
 #include "SampleClip.h"
 #include "SampleTrack.h"
+#include <memory>
 
 
 
-SamplePlayHandle::SamplePlayHandle( SampleBuffer* sampleBuffer , bool ownAudioPort ) :
+SamplePlayHandle::SamplePlayHandle( Sample* sample , bool ownAudioPort ) :
 	PlayHandle( TypeSamplePlayHandle ),
-	m_sampleBuffer( sharedObject::ref( sampleBuffer ) ),
+	m_sample( sample ),
 	m_doneMayReturnTrue( true ),
 	m_frame( 0 ),
 	m_ownAudioPort( ownAudioPort ),
+	m_ownSample(false),
 	m_defaultVolumeModel( DefaultVolume, MinVolume, MaxVolume, 1 ),
 	m_volumeModel( &m_defaultVolumeModel ),
 	m_track( nullptr ),
@@ -54,16 +58,16 @@ SamplePlayHandle::SamplePlayHandle( SampleBuffer* sampleBuffer , bool ownAudioPo
 
 
 SamplePlayHandle::SamplePlayHandle( const QString& sampleFile ) :
-	SamplePlayHandle( new SampleBuffer( sampleFile ) , true)
+	SamplePlayHandle( new Sample(sampleFile, SampleBufferV2::StrDataType::AudioFile) , true)
 {
-	sharedObject::unref( m_sampleBuffer );
+	m_ownSample = true;
 }
 
 
 
 
 SamplePlayHandle::SamplePlayHandle( SampleClip* clip ) :
-	SamplePlayHandle( clip->sampleBuffer() , false)
+	SamplePlayHandle( &clip->sample() , false)
 {
 	m_track = clip->getTrack();
 	setAudioPort( ( (SampleTrack *)clip->getTrack() )->audioPort() );
@@ -74,10 +78,14 @@ SamplePlayHandle::SamplePlayHandle( SampleClip* clip ) :
 
 SamplePlayHandle::~SamplePlayHandle()
 {
-	sharedObject::unref( m_sampleBuffer );
 	if( m_ownAudioPort )
 	{
 		delete audioPort();
+	}
+
+	if ( m_ownSample ) 
+	{
+		delete m_sample;
 	}
 }
 
@@ -113,7 +121,7 @@ void SamplePlayHandle::play( sampleFrame * buffer )
 				m_volumeModel->value() / DefaultVolume } };*/
 		// SamplePlayHandle always plays the sample at its original pitch;
 		// it is used only for previews, SampleTracks and the metronome.
-		if (!m_sampleBuffer->play(workingBuffer, &m_state, frames, DefaultBaseFreq))
+		if (!m_sample->play(workingBuffer, frames, DefaultBaseFreq))
 		{
 			memset(workingBuffer, 0, frames * sizeof(sampleFrame));
 		}
@@ -143,8 +151,8 @@ bool SamplePlayHandle::isFromTrack( const Track * _track ) const
 
 f_cnt_t SamplePlayHandle::totalFrames() const
 {
-	return ( m_sampleBuffer->endFrame() - m_sampleBuffer->startFrame() ) *
-			( Engine::audioEngine()->processingSampleRate() / m_sampleBuffer->sampleRate() );
+	return ( m_sample->endFrame() - m_sample->startFrame() ) *
+			( Engine::audioEngine()->processingSampleRate() / m_sample->sampleRate() );
 }
 
 

@@ -2,7 +2,7 @@
  * SampleClip.cpp
  *
  * Copyright (c) 2005-2014 Tobias Doerffel <tobydox/at/users.sourceforge.net>
- *
+ * 
  * This file is part of LMMS - https://lmms.io
  *
  * This program is free software; you can redistribute it and/or
@@ -27,13 +27,14 @@
 #include <QDomElement>
 
 #include "SampleBuffer.h"
+#include "SampleBufferV2.h"
 #include "SampleClipView.h"
 #include "SampleTrack.h"
 #include "TimeLineWidget.h"
 
 SampleClip::SampleClip( Track * _track ) :
 	Clip( _track ),
-	m_sampleBuffer( new SampleBuffer ),
+	m_sample(1),
 	m_isPlaying( false )
 {
 	saveJournallingState( false );
@@ -85,10 +86,7 @@ SampleClip::SampleClip( Track * _track ) :
 SampleClip::SampleClip(const SampleClip& orig) :
 	SampleClip(orig.getTrack())
 {
-	// TODO: This creates a new SampleBuffer for the new Clip, eating up memory
-	// & eventually causing performance issues. Letting tracks share buffers
-	// when they're identical would fix this, but isn't possible right now.
-	*m_sampleBuffer = *orig.m_sampleBuffer;
+	m_sample = orig.m_sample;
 	m_isPlaying = orig.m_isPlaying;
 }
 
@@ -102,9 +100,6 @@ SampleClip::~SampleClip()
 	{
 		sampletrack->updateClips();
 	}
-	Engine::audioEngine()->requestChangeInModel();
-	sharedObject::unref( m_sampleBuffer );
-	Engine::audioEngine()->doneChangeInModel();
 }
 
 
@@ -120,20 +115,21 @@ void SampleClip::changeLength( const TimePos & _length )
 
 const QString & SampleClip::sampleFile() const
 {
-	return m_sampleBuffer->audioFile();
+	return m_sample.sampleBuffer()->filePath();
 }
 
 
 
 void SampleClip::setSampleBuffer( SampleBuffer* sb )
 {
-	Engine::audioEngine()->requestChangeInModel();
-	sharedObject::unref( m_sampleBuffer );
-	Engine::audioEngine()->doneChangeInModel();
-	m_sampleBuffer = sb;
-	updateLength();
+	//TODO samplecaching: SampleClip::setSampleBuffer
+	// Engine::audioEngine()->requestChangeInModel();
+	// sharedObject::unref( m_sampleBuffer );
+	// Engine::audioEngine()->doneChangeInModel();
+	// m_sampleBuffer = sb;
+	// updateLength();
 
-	emit sampleChanged();
+	// emit sampleChanged();
 }
 
 
@@ -149,7 +145,7 @@ void SampleClip::setSampleFile( const QString & _sf )
 	}
 	else
 	{	//Otherwise set it to the sample's length
-		m_sampleBuffer->setAudioFile( _sf );
+		m_sample = std::move(Sample( _sf, SampleBufferV2::StrDataType::AudioFile ));
 		length = sampleLength();
 	}
 	changeLength(length);
@@ -220,7 +216,7 @@ void SampleClip::updateLength()
 
 TimePos SampleClip::sampleLength() const
 {
-	return (int)( m_sampleBuffer->frames() / Engine::framesPerTick() );
+	return m_sample.calculateSampleLength();
 }
 
 
@@ -228,15 +224,18 @@ TimePos SampleClip::sampleLength() const
 
 void SampleClip::setSampleStartFrame(f_cnt_t startFrame)
 {
-	m_sampleBuffer->setStartFrame( startFrame );
+	m_sample.setStartFrame( startFrame );
 }
 
 
-
+void SampleClip::setSampleFrameIndex(f_cnt_t frameIndex) 
+{
+	m_sample.setFrameIndex(frameIndex);
+}
 
 void SampleClip::setSamplePlayLength(f_cnt_t length)
 {
-	m_sampleBuffer->setEndFrame( length );
+	m_sample.setEndFrame( length );
 }
 
 
@@ -258,20 +257,20 @@ void SampleClip::saveSettings( QDomDocument & _doc, QDomElement & _this )
 	_this.setAttribute( "off", startTimeOffset() );
 	if( sampleFile() == "" )
 	{
-		QString s;
-		_this.setAttribute( "data", m_sampleBuffer->toBase64( s ) );
+		_this.setAttribute( "data", m_sample.sampleBuffer()->toBase64());
 	}
 
-	_this.setAttribute( "sample_rate", m_sampleBuffer->sampleRate());
+	_this.setAttribute( "sample_rate", m_sample.sampleBuffer()->sampleRate());
 	if( usesCustomClipColor() )
 	{
 		_this.setAttribute( "color", color().name() );
 	}
-	if (m_sampleBuffer->reversed())
+	if (m_sample.reversed())
 	{
 		_this.setAttribute("reversed", "true");
 	}
-	// TODO: start- and end-frame
+	_this.setAttribute( "start_frame", m_sample.startFrame());
+	_this.setAttribute( "end_frame", m_sample.endFrame());
 }
 
 
@@ -286,14 +285,14 @@ void SampleClip::loadSettings( const QDomElement & _this )
 	setSampleFile( _this.attribute( "src" ) );
 	if( sampleFile().isEmpty() && _this.hasAttribute( "data" ) )
 	{
-		m_sampleBuffer->loadFromBase64( _this.attribute( "data" ) );
+		m_sample = Sample( _this.attribute( "data" ), SampleBufferV2::StrDataType::Base64 );
 	}
 	changeLength( _this.attribute( "len" ).toInt() );
 	setMuted( _this.attribute( "muted" ).toInt() );
 	setStartTimeOffset( _this.attribute( "off" ).toInt() );
 
 	if ( _this.hasAttribute( "sample_rate" ) ) {
-		m_sampleBuffer->setSampleRate( _this.attribute( "sample_rate" ).toInt() );
+		//TODO samplecaching: m_sample.sampleBuffer().resample( _this.attribute( "sample_rate" ).toInt() );
 	}
 
 	if( _this.hasAttribute( "color" ) )
@@ -308,13 +307,20 @@ void SampleClip::loadSettings( const QDomElement & _this )
 
 	if(_this.hasAttribute("reversed"))
 	{
-		m_sampleBuffer->setReversed(true);
+		m_sample.setReversed(true);
 		emit wasReversed(); // tell SampleClipView to update the view
 	}
 }
 
+QString SampleClip::nodeName() const 
+{
+	return "sampleclip";
+}
 
-
+Sample& SampleClip::sample() 
+{
+	return m_sample;
+}
 
 ClipView * SampleClip::createView( TrackView * _tv )
 {

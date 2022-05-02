@@ -26,6 +26,7 @@
 #define SAMPLE_CLIP_H
 
 #include "Clip.h"
+#include "Sample.h"
 
 class SampleBuffer;
 
@@ -46,21 +47,13 @@ public:
 
 	void saveSettings( QDomDocument & _doc, QDomElement & _parent ) override;
 	void loadSettings( const QDomElement & _this ) override;
-	inline QString nodeName() const override
-	{
-		return "sampleclip";
-	}
-
-	SampleBuffer* sampleBuffer()
-	{
-		return m_sampleBuffer;
-	}
-
+	
+	QString nodeName() const override;
+	Sample& sample();
 	TimePos sampleLength() const;
 	void setSampleStartFrame( f_cnt_t startFrame );
 	void setSamplePlayLength( f_cnt_t length );
 	ClipView * createView( TrackView * _tv ) override;
-
 
 	bool isPlaying() const;
 	void setIsPlaying(bool isPlaying);
@@ -68,25 +61,21 @@ public:
 public slots:
 	void setSampleBuffer( SampleBuffer* sb );
 	void setSampleFile( const QString & _sf );
+	void setSampleFrameIndex(f_cnt_t frameIndex);
 	void updateLength();
 	void toggleRecord();
 	void playbackPositionChanged();
 	void updateTrackClips();
 
-
 private:
-	SampleBuffer* m_sampleBuffer;
+	Sample m_sample;
 	BoolModel m_recordModel;
 	bool m_isPlaying;
 
 	friend class SampleClipView;
 
-
 signals:
 	void sampleChanged();
 	void wasReversed();
-} ;
-
-
-
+};
 #endif
