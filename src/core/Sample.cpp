@@ -37,8 +37,15 @@
 #include "SampleBufferV2.h"
 #include "interpolation.h"
 #include "lmms_basics.h"
+#include "qglobal.h"
 
+#include <QPainter>
+
+#include <array>
 #include <iostream>
+#include <memory>
+#include <samplerate.h>
+#include <vector>
 
 Sample::Sample() :
 	m_sampleBuffer(nullptr),
@@ -51,9 +58,11 @@ Sample::Sample() :
 	m_endFrame(0),
 	m_loopStartFrame(0),
 	m_loopEndFrame(0),
-	m_frameIndex(0)
+	m_frameIndex(0),
+	m_sampleRate(0),
+	m_resamplingState(nullptr, [](SRC_STATE* state){})
 {
-	connect(Engine::audioEngine(), SIGNAL(sampleRateChanged()), this, SLOT(sampleRateChanged()));
+	connect(Engine::audioEngine(), &AudioEngine::sampleRateChanged, this, &Sample::sampleRateChanged);
 }
 
 Sample::Sample(const QString &strData, SampleBufferV2::StrDataType dataType) : Sample()
@@ -61,20 +70,15 @@ Sample::Sample(const QString &strData, SampleBufferV2::StrDataType dataType) : S
 	setSampleData(strData, dataType);
 	m_endFrame = m_sampleBuffer->numFrames();
 	m_loopEndFrame = m_sampleBuffer->numFrames();
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 Sample::Sample(const sampleFrame *data, const std::size_t numFrames) : Sample()
 {
-	auto buf = std::vector<sample_t>(numFrames * DEFAULT_CHANNELS);
-	for (f_cnt_t frame = 0; frame < numFrames; ++frame) 
-	{
-		buf[frame] = data[frame][0];
-		buf[frame + 1] = data[frame][1];
-	}
-
 	m_sampleBuffer = std::make_shared<const SampleBufferV2>(data, numFrames);
 	m_endFrame = numFrames;
 	m_loopEndFrame = numFrames;
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 Sample::Sample(const SampleBufferV2 *buffer) : Sample()
@@ -82,6 +86,7 @@ Sample::Sample(const SampleBufferV2 *buffer) : Sample()
 	m_sampleBuffer.reset(buffer);
 	m_endFrame = buffer->numFrames();
 	m_loopEndFrame = buffer->numFrames();
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 Sample::Sample(const std::size_t numFrames) : Sample()
@@ -89,6 +94,7 @@ Sample::Sample(const std::size_t numFrames) : Sample()
 	m_sampleBuffer = std::make_shared<const SampleBufferV2>(numFrames);
 	m_endFrame = numFrames;
 	m_loopEndFrame = numFrames;
+	m_sampleRate = Engine::audioEngine()->processingSampleRate();
 }
 
 Sample::Sample(const Sample &other) :
@@ -101,7 +107,9 @@ Sample::Sample(const Sample &other) :
 	m_startFrame(other.m_startFrame),
 	m_endFrame(other.m_endFrame),
 	m_loopStartFrame(other.m_loopStartFrame),
-	m_frameIndex(other.m_frameIndex) {}
+	m_frameIndex(other.m_frameIndex),
+	m_sampleRate(other.m_sampleRate),
+	m_resamplingState(other.m_resamplingState) {}
 
 Sample &Sample::operator=(const Sample &other)
 {
@@ -120,12 +128,99 @@ Sample &Sample::operator=(const Sample &other)
 	m_endFrame = other.m_endFrame;
 	m_loopStartFrame = other.m_loopStartFrame;
 	m_frameIndex = other.m_frameIndex;
+	m_sampleRate = other.m_sampleRate;
+	m_resamplingState = other.m_resamplingState;
 
 	return *this;
 }
 
 bool Sample::play(sampleFrame *dst, const fpp_t numFrames, const float freq, const LoopMode loopMode)
 {
+	if (numFrames == 0 ||
+		(loopMode == LoopMode::LoopOff && (m_frameIndex < m_startFrame || m_frameIndex > m_endFrame)) ||
+		((loopMode == LoopMode::LoopOn || loopMode == LoopMode::LoopPingPong) && (m_frameIndex < m_loopStartFrame || m_frameIndex > m_loopEndFrame))) 
+	{ 
+		return false; 
+	}
+
+	auto buf = std::vector<sampleFrame>(numFrames);	
+	const double freqFactor = (double) freq / (double) m_frequency *
+		m_sampleRate / Engine::audioEngine()->processingSampleRate();
+
+	//Check if the sample needs to be pitched
+	if (freqFactor != 1.0 || m_varyingPitch) 
+	{
+		const f_cnt_t totalFramesForCurrentPitch = static_cast<f_cnt_t>((m_endFrame - m_startFrame) / freqFactor);
+		if (totalFramesForCurrentPitch == 0) 
+		{
+			return false;
+		}
+		
+		int src_error = 0;
+		if (!m_resamplingState) 
+		{ 
+			m_resamplingState = std::shared_ptr<SRC_STATE>(
+				src_new(m_interpolationMode, DEFAULT_CHANNELS, &src_error), 
+				[](SRC_STATE* state){ src_delete(state); });
+		}
+
+		std::array<const f_cnt_t, 5> sampleMargin = { 64, 64, 64, 4, 4 };
+		f_cnt_t fragmentSize = static_cast<f_cnt_t>(numFrames * freqFactor) + sampleMargin[m_interpolationMode];
+		buf.resize(fragmentSize);
+
+		SRC_DATA srcData;
+		srcData.data_in = (m_sampleBuffer->sampleData().begin() + m_frameIndex)->data();
+		srcData.input_frames = numFrames;
+		srcData.data_out = buf.data()->data();
+		srcData.output_frames = fragmentSize;
+		srcData.src_ratio = 1.0 / freqFactor;
+		srcData.end_of_input = 0;
+		src_error = src_process(m_resamplingState.get(), &srcData);
+
+		if (src_error != 0)
+		{
+			std::cout << "SampleBuffer: error while resampling: " << src_strerror(src_error) << '\n';
+		}
+		
+		if (srcData.output_frames_gen > numFrames)
+		{
+			std::cout << "SampleBufferV2: not enough frames:" << srcData.output_frames_gen << "/" << numFrames << '\n';
+		}
+	}
+
+	if (m_reversed)
+	{
+		std::copy(
+			m_sampleBuffer->sampleData().rbegin() + m_frameIndex, 
+			m_sampleBuffer->sampleData().rbegin() + m_frameIndex + buf.size(), buf.begin());
+	}
+	else 
+	{
+		std::copy(
+			m_sampleBuffer->sampleData().begin() + m_frameIndex, 
+			m_sampleBuffer->sampleData().begin() + m_frameIndex + buf.size(), buf.begin());
+	}
+
+	for (auto& frame : buf) 
+	{
+		frame[0] *= m_amplification;
+		frame[1] *= m_amplification;
+	}
+	std::copy(buf.begin(), buf.end(), dst);
+
+	//Advance
+	switch (loopMode) 
+	{
+	case LoopMode::LoopOff:
+		m_frameIndex += buf.size();
+		break;
+	case LoopMode::LoopOn:
+		m_frameIndex = getLoopedIndex(m_frameIndex + buf.size(), m_loopStartFrame, m_loopEndFrame);
+		break;
+	case LoopMode::LoopPingPong:
+		m_frameIndex = getPingPongIndex(m_frameIndex + buf.size(), m_loopStartFrame, m_loopEndFrame);
+		break;
+	}
 
 	return true;
 }
@@ -217,7 +312,7 @@ void Sample::setSampleBuffer(const SampleBufferV2 *buffer)
 {
 	m_sampleBuffer.reset(buffer);
 	m_endFrame = buffer->numFrames();
-	m_loopEndFrame = buffer->numFrames();
+	m_loopEndFrame = m_endFrame;
 	m_frameIndex = 0;
 }
 
@@ -302,20 +397,17 @@ QString Sample::openSample()
 	{
 		dir = ConfigManager::inst()->userSamplesDir();
 	}
-	// change dir to position of previously opened file
+
 	ofd.setDirectory(dir);
 	ofd.setFileMode(FileDialog::ExistingFiles);
 
-	// set filters
 	QStringList types;
-	types << tr("All Audio-Files (*.wav *.ogg *.ds *.flac *.spx *.voc "
-		"*.aif *.aiff *.au *.raw)")
+	types << tr("All Audio-Files (*.wav *.ogg *.ds *.flac *.spx *.voc " "*.aif *.aiff *.au *.raw)")
 		<< tr("Wave-Files (*.wav)")
 		<< tr("OGG-Files (*.ogg)")
 		<< tr("DrumSynth-Files (*.ds)")
 		<< tr("FLAC-Files (*.flac)")
 		<< tr("SPEEX-Files (*.spx)")
-		<< tr("MP3-Files (*.mp3)")
 		<< tr("VOC-Files (*.voc)")
 		<< tr("AIFF-Files (*.aif *.aiff)")
 		<< tr("AU-Files (*.au)")
@@ -324,7 +416,6 @@ QString Sample::openSample()
 	ofd.setNameFilters(types);
 	if (m_sampleBuffer->hasFilePath())
 	{
-		// select previously opened file
 		ofd.selectFile(QFileInfo(m_sampleBuffer->filePath()).fileName());
 	}
 
@@ -342,29 +433,13 @@ QString Sample::openSample()
 
 int Sample::calculateSampleLength() const
 {
-	return double(m_endFrame - m_startFrame) / m_sampleBuffer->sampleRate() * 1000;
-}
-
-sample_t Sample::userWaveSample(const float sample) const
-{
-	//samplecaching. TODO: Sample::userWaveSample
-	// f_cnt_t numFrames = m_sampleBuffer->numFrames();
-	// auto samples = m_sampleBuffer->samples();
-	// const float frame = sample * numFrames;
-	// f_cnt_t f1 = static_cast<f_cnt_t>(frame) % numFrames;
-	// if (f1 < 0)
-	// {
-	// 	f1 += numFrames;
-	// }
-	// return linearInterpolate(samples[f1 * DEFAULT_CHANNELS][0], samples[(f1 * DEFAULT_CHANNELS + 1) % numFrames][0], fraction(frame));
-	return sample;
+	return static_cast<int>(1 / Engine::framesPerTick(m_sampleBuffer->sampleRate()) * m_sampleBuffer->numFrames());
 }
 
 void Sample::sampleRateChanged()
 {
 	auto numFrames = m_sampleBuffer->numFrames();
-	auto oldRate = m_sampleBuffer->sampleRate();
-	auto oldRateToNewRateRatio = static_cast<float>(Engine::audioEngine()->processingSampleRate()) / oldRate;
+	auto oldRateToNewRateRatio = static_cast<float>(Engine::audioEngine()->processingSampleRate()) / m_sampleRate;
 	m_startFrame = qBound(0, f_cnt_t(m_startFrame * oldRateToNewRateRatio), numFrames);
 	m_endFrame = qBound(m_startFrame, f_cnt_t(m_endFrame * oldRateToNewRateRatio), numFrames);
 	m_loopStartFrame = qBound(0, f_cnt_t(m_loopStartFrame * oldRateToNewRateRatio), numFrames);

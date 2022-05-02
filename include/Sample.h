@@ -28,6 +28,7 @@
 #include <memory>
 #include <QObject>
 #include <QString>
+#include <samplerate.h>
 
 #include "lmms_basics.h"
 #include "SampleBufferV2.h"
@@ -50,8 +51,8 @@ public:
 	Sample(const sampleFrame* data, const std::size_t numFrames);
 	Sample(const SampleBufferV2* buffer);
 	Sample(const std::size_t numFrames);
-	Sample(const Sample& other);
 	
+	Sample(const Sample& other);
 	Sample& operator=(const Sample& other);
 
 	bool play(sampleFrame* dst, const fpp_t numFrames, const float freq, const LoopMode = LoopMode::LoopOff);
@@ -86,9 +87,7 @@ public:
 	void setAllPointFrames(f_cnt_t start, f_cnt_t end, f_cnt_t loopStart, f_cnt_t loopEnd);
 
 	QString openSample();
-
 	int calculateSampleLength() const;
-	sample_t userWaveSample(const float sample) const;
 	
 public slots:
 	void sampleRateChanged();
@@ -110,6 +109,8 @@ private:
 	f_cnt_t m_loopStartFrame;
 	f_cnt_t m_loopEndFrame;
 	f_cnt_t m_frameIndex;
+	f_cnt_t m_sampleRate;
+	std::shared_ptr<SRC_STATE> m_resamplingState;
 
 signals:
 	void sampleUpdated();
