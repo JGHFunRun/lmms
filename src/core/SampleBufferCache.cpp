@@ -49,6 +49,6 @@ std::shared_ptr<const SampleBufferV2> SampleBufferCache::add(const QString& id, 
 
 void SampleBufferCache::removeFromCache(const QString& id, const SampleBufferV2* ptr) noexcept
 {
-    delete ptr;
+    const_cast<SampleBufferV2*>(ptr)->deleteLater();
     m_hash.remove(id);
 }
