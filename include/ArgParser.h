@@ -14,12 +14,15 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QLocale>
+#include <QString>
 #include <QTimer>
 #include <QTranslator>
 #include <QApplication>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTextStream>
+
+#include <cassert>
 
 #ifdef LMMS_BUILD_WIN32
 #include <windows.h>
